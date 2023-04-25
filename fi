@@ -1,117 +1,48 @@
-WITH base AS (
-  SELECT
-    feedBin,
-    batch,
-    start_date,
-    end_date,
-    feedConsumption_l_hk,
-    SUM(feedConsumption) AS total_consumption
-  FROM feedConsumption_l
-  JOIN feedConsumption_l_all_ln_bs
-    ON feedConsumption_l.feedConsumption_l_hk = feedConsumption_l_all_ln_bs.feedConsumption_l_hk
-    AND feedConsumption_l_all_ln_bs.currec = 1
-  GROUP BY
-    feedBin,
-    batch,
-    start_date,
-    end_date,
-    feedConsumption_l_hk
-),
-date_range AS (
-  SELECT DISTINCT
-    date
+CREATE TEMPORARY VIEW all_dates AS (
+  SELECT 
+    batch_id, 
+    feed_bin, 
+    explode(sequence(start_date, COALESCE(end_date, next_start_date, current_date()), interval 1 day)) AS consumption_date
   FROM (
-    SELECT
-      start_date AS date
-    FROM base
-    UNION
-    SELECT
-      end_date AS date
-    FROM base
-  )
-),
-cte AS (
-  SELECT
-    feedBin,
-    batch,
-    start_date,
-    end_date,
-    feedConsumption_l_hk,
-    total_consumption / DATEDIFF(end_date, start_date) AS daily_consumption,
-    start_date AS date
-  FROM base
-  UNION ALL
-  SELECT
-    feedBin,
-    batch,
-    start_date,
-    end_date,
-    feedConsumption_l_hk,
-    daily_consumption,
-    DATE_ADD(date, INTERVAL 1 DAY) AS date
-  FROM cte
-  WHERE date < end_date
-)
-SELECT
-  feedBin,
-  batch,
-  date,
-  SUM(daily_consumption) AS consumption_per_day
-FROM cte
-CROSS JOIN date_range
-WHERE date = cte.date
-GROUP BY
-  feedBin,
-  batch,
-  date
-ORDER BY
-  feedBin,
-  batch,
-  date
+    SELECT 
+      batch_id,
+      feed_bin,
+      start_date,
+      end_date,
+      LEAD(start_date) OVER (PARTITION BY batch_id, feed_bin ORDER BY start_date) AS next_start_date
+    FROM feedConsumption_l
+    JOIN feedConsumption_l_all_ln_bs ON feedConsumption_l.feedConsumption_l_hk = feedConsumption_l_all_ln_bs.feedConsumption_l_hk
+    WHERE feedConsumption_l_all_ln_bs.currec = 1
+  ) subquery
+);
 
-second
+CREATE TEMPORARY VIEW feed_consumption_per_day AS (
+  SELECT 
+    all_dates.batch_id,
+    all_dates.feed_bin,
+    all_dates.consumption_date,
+    amount / DATEDIFF(COALESCE(end_date, next_start_date, current_date()), start_date) AS consumption_per_day,
+    unit_iso_code AS unit_of_weight
+  FROM all_dates
+  JOIN (
+    SELECT 
+      feedConsumption_l.batch_id,
+      feedConsumption_l.feed_bin,
+      feedConsumption_l.start_date,
+      feedConsumption_l.end_date,
+      feedConsumption_l_all_ln_bs.amount,
+      feedConsumption_l_all_ln_bs.unit_iso_code,
+      LEAD(feedConsumption_l.start_date) OVER (PARTITION BY feedConsumption_l.batch_id, feedConsumption_l.feed_bin ORDER BY feedConsumption_l.start_date) AS next_start_date
+    FROM feedConsumption_l
+    JOIN feedConsumption_l_all_ln_bs ON feedConsumption_l.feedConsumption_l_hk = feedConsumption_l_all_ln_bs.feedConsumption_l_hk
+    WHERE feedConsumption_l_all_ln_bs.currec = 1
+  ) subquery ON all_dates.batch_id = subquery.batch_id AND all_dates.feed_bin = subquery.feed_bin AND all_dates.consumption_date BETWEEN subquery.start_date AND COALESCE(subquery.end_date, subquery.next_start_date, current_date())
+);
 
-
-WITH base AS (
-  SELECT
-    feedBin,
-    batch,
-    start_date,
-    COALESCE(
-      LEAD(start_date) OVER (
-        PARTITION BY feedBin, batch
-        ORDER BY start_date
-      ),
-      CURRENT_DATE()
-    ) AS end_date,
-    feedConsumption_l_hk,
-    SUM(feedConsumption) AS total_consumption
-  FROM feedConsumption_l
-  JOIN feedConsumption_l_all_ln_bs
-    ON feedConsumption_l.feedConsumption_l_hk = feedConsumption_l_all_ln_bs.feedConsumption_l_hk
-    AND feedConsumption_l_all_ln_bs.currec = 1
-  GROUP BY
-    feedBin,
-    batch,
-    start_date,
-    feedConsumption_l_hk
-),
-
-third
-
-SELECT
-  feedBin,
-  batch,
-  date_add(start_date, iter - 1) AS date,
-  total_consumption / num_days AS feedConsumptionPerDay,
-  feed_unit_of_weight AS unitOfWeight
-FROM
-  recursiveCTE
-JOIN
-  feedConsumption_l_all_ln_bs
-ON
-  recursiveCTE.feedConsumption_l_hk = feedConsumption_l_all_ln_bs.feedConsumption_l_hk
-WHERE
-  iter <= num_days
-
-
+SELECT 
+  batch_id,
+  feed_bin,
+  consumption_date,
+  consumption_per_day,
+  unit_of_weight
+FROM feed_consumption_per_day;
