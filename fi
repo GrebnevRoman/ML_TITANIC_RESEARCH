@@ -1,0 +1,117 @@
+WITH base AS (
+  SELECT
+    feedBin,
+    batch,
+    start_date,
+    end_date,
+    feedConsumption_l_hk,
+    SUM(feedConsumption) AS total_consumption
+  FROM feedConsumption_l
+  JOIN feedConsumption_l_all_ln_bs
+    ON feedConsumption_l.feedConsumption_l_hk = feedConsumption_l_all_ln_bs.feedConsumption_l_hk
+    AND feedConsumption_l_all_ln_bs.currec = 1
+  GROUP BY
+    feedBin,
+    batch,
+    start_date,
+    end_date,
+    feedConsumption_l_hk
+),
+date_range AS (
+  SELECT DISTINCT
+    date
+  FROM (
+    SELECT
+      start_date AS date
+    FROM base
+    UNION
+    SELECT
+      end_date AS date
+    FROM base
+  )
+),
+cte AS (
+  SELECT
+    feedBin,
+    batch,
+    start_date,
+    end_date,
+    feedConsumption_l_hk,
+    total_consumption / DATEDIFF(end_date, start_date) AS daily_consumption,
+    start_date AS date
+  FROM base
+  UNION ALL
+  SELECT
+    feedBin,
+    batch,
+    start_date,
+    end_date,
+    feedConsumption_l_hk,
+    daily_consumption,
+    DATE_ADD(date, INTERVAL 1 DAY) AS date
+  FROM cte
+  WHERE date < end_date
+)
+SELECT
+  feedBin,
+  batch,
+  date,
+  SUM(daily_consumption) AS consumption_per_day
+FROM cte
+CROSS JOIN date_range
+WHERE date = cte.date
+GROUP BY
+  feedBin,
+  batch,
+  date
+ORDER BY
+  feedBin,
+  batch,
+  date
+
+second
+
+
+WITH base AS (
+  SELECT
+    feedBin,
+    batch,
+    start_date,
+    COALESCE(
+      LEAD(start_date) OVER (
+        PARTITION BY feedBin, batch
+        ORDER BY start_date
+      ),
+      CURRENT_DATE()
+    ) AS end_date,
+    feedConsumption_l_hk,
+    SUM(feedConsumption) AS total_consumption
+  FROM feedConsumption_l
+  JOIN feedConsumption_l_all_ln_bs
+    ON feedConsumption_l.feedConsumption_l_hk = feedConsumption_l_all_ln_bs.feedConsumption_l_hk
+    AND feedConsumption_l_all_ln_bs.currec = 1
+  GROUP BY
+    feedBin,
+    batch,
+    start_date,
+    feedConsumption_l_hk
+),
+
+third
+
+SELECT
+  feedBin,
+  batch,
+  date_add(start_date, iter - 1) AS date,
+  total_consumption / num_days AS feedConsumptionPerDay,
+  feed_unit_of_weight AS unitOfWeight
+FROM
+  recursiveCTE
+JOIN
+  feedConsumption_l_all_ln_bs
+ON
+  recursiveCTE.feedConsumption_l_hk = feedConsumption_l_all_ln_bs.feedConsumption_l_hk
+WHERE
+  iter <= num_days
+
+
