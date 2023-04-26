@@ -1,48 +1,33 @@
-CREATE TEMPORARY VIEW all_dates AS (
-  SELECT 
-    batch_id, 
-    feed_bin, 
-    explode(sequence(start_date, COALESCE(end_date, next_start_date, current_date()), interval 1 day)) AS consumption_date
-  FROM (
-    SELECT 
-      batch_id,
-      feed_bin,
-      start_date,
-      end_date,
-      LEAD(start_date) OVER (PARTITION BY batch_id, feed_bin ORDER BY start_date) AS next_start_date
-    FROM feedConsumption_l
-    JOIN feedConsumption_l_all_ln_bs ON feedConsumption_l.feedConsumption_l_hk = feedConsumption_l_all_ln_bs.feedConsumption_l_hk
-    WHERE feedConsumption_l_all_ln_bs.currec = 1
-  ) subquery
-);
-
-CREATE TEMPORARY VIEW feed_consumption_per_day AS (
-  SELECT 
-    all_dates.batch_id,
-    all_dates.feed_bin,
-    all_dates.consumption_date,
-    amount / DATEDIFF(COALESCE(end_date, next_start_date, current_date()), start_date) AS consumption_per_day,
-    unit_iso_code AS unit_of_weight
-  FROM all_dates
-  JOIN (
-    SELECT 
-      feedConsumption_l.batch_id,
-      feedConsumption_l.feed_bin,
-      feedConsumption_l.start_date,
-      feedConsumption_l.end_date,
-      feedConsumption_l_all_ln_bs.amount,
-      feedConsumption_l_all_ln_bs.unit_iso_code,
-      LEAD(feedConsumption_l.start_date) OVER (PARTITION BY feedConsumption_l.batch_id, feedConsumption_l.feed_bin ORDER BY feedConsumption_l.start_date) AS next_start_date
-    FROM feedConsumption_l
-    JOIN feedConsumption_l_all_ln_bs ON feedConsumption_l.feedConsumption_l_hk = feedConsumption_l_all_ln_bs.feedConsumption_l_hk
-    WHERE feedConsumption_l_all_ln_bs.currec = 1
-  ) subquery ON all_dates.batch_id = subquery.batch_id AND all_dates.feed_bin = subquery.feed_bin AND all_dates.consumption_date BETWEEN subquery.start_date AND COALESCE(subquery.end_date, subquery.next_start_date, current_date())
-);
-
+WITH feedBinSwitch_l_active AS (
+  SELECT feedBin_h_hk_active, endDate_dts
+  FROM your_table_name
+  WHERE feedBin_h_hk_active IS NOT NULL
+), feedBinSwitch_l_inactive AS (
+  SELECT feedBin_h_hk_inactive, startDate_dts
+  FROM your_table_name
+  WHERE feedBin_h_hk_inactive IS NOT NULL
+), valid_feedBinSwitch_l_all_sts_bs AS (
+  SELECT *
+  FROM your_table_name fb
+  JOIN ðfeedBinSwitch_l_all_sts_bs bs ON fb.feedBinSwitch_l_hk = bs.feedBinSwitch_l_hk
+  WHERE bs.currec = 1 AND bs.status = 'I'
+), valid_feedBinSwitch_l_all_mn_bs AS (
+  SELECT *
+  FROM your_table_name fb
+  JOIN ðfeedBinSwitch_l_all_mn_bs mn ON fb.feedBinSwitch_l_hk = mn.feedBinSwitch_l_hk
+  WHERE mn.currec = 1
+)
 SELECT 
-  batch_id,
-  feed_bin,
-  consumption_date,
-  consumption_per_day,
-  unit_of_weight
-FROM feed_consumption_per_day;
+  fb.feedBinName, 
+  COALESCE(fbsa.endDate_dts, fbsi.startDate_dts) AS start_date,
+  COALESCE(fbsi.startDate_dts, fbsa.endDate_dts) AS end_date
+FROM your_table_name fb
+LEFT JOIN valid_feedBinSwitch_l_all_sts_bs bs
+  ON fb.feedBinSwitch_l_hk = bs.feedBinSwitch_l_hk AND fb.startDate_dts <= bs.endDate_dts AND fb.endDate_dts >= bs.startDate_dts
+LEFT JOIN valid_feedBinSwitch_l_all_mn_bs mn
+  ON fb.feedBinSwitch_l_hk = mn.feedBinSwitch_l_hk AND fb.startDate_dts <= mn.endDate_dts AND fb.endDate_dts >= mn.startDate_dts
+LEFT JOIN feedBinSwitch_l_active fbsa
+  ON fb.feedBin_h_hk_active = fbsa.feedBin_h_hk_active AND fb.endDate_dts = fbsa.endDate_dts
+LEFT JOIN feedBinSwitch_l_inactive fbsi
+  ON fb.feedBin_h_hk_inactive = fbsi.feedBin_h_hk_inactive AND fb.startDate_dts = fbsi.startDate_dts
+WHERE (fb.feedBin_h_hk_active IS NOT NULL OR fb.feedBin_h_hk_inactive IS NOT NULL)
