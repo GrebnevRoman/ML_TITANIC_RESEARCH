@@ -1,33 +1,99 @@
-WITH feedBinSwitch_l_active AS (
-  SELECT feedBin_h_hk_active, endDate_dts
-  FROM your_table_name
-  WHERE feedBin_h_hk_active IS NOT NULL
-), feedBinSwitch_l_inactive AS (
-  SELECT feedBin_h_hk_inactive, startDate_dts
-  FROM your_table_name
-  WHERE feedBin_h_hk_inactive IS NOT NULL
-), valid_feedBinSwitch_l_all_sts_bs AS (
-  SELECT *
-  FROM your_table_name fb
-  JOIN ðfeedBinSwitch_l_all_sts_bs bs ON fb.feedBinSwitch_l_hk = bs.feedBinSwitch_l_hk
-  WHERE bs.currec = 1 AND bs.status = 'I'
-), valid_feedBinSwitch_l_all_mn_bs AS (
-  SELECT *
-  FROM your_table_name fb
-  JOIN ðfeedBinSwitch_l_all_mn_bs mn ON fb.feedBinSwitch_l_hk = mn.feedBinSwitch_l_hk
-  WHERE mn.currec = 1
-)
-SELECT 
-  fb.feedBinName, 
-  COALESCE(fbsa.endDate_dts, fbsi.startDate_dts) AS start_date,
-  COALESCE(fbsi.startDate_dts, fbsa.endDate_dts) AS end_date
-FROM your_table_name fb
-LEFT JOIN valid_feedBinSwitch_l_all_sts_bs bs
-  ON fb.feedBinSwitch_l_hk = bs.feedBinSwitch_l_hk AND fb.startDate_dts <= bs.endDate_dts AND fb.endDate_dts >= bs.startDate_dts
-LEFT JOIN valid_feedBinSwitch_l_all_mn_bs mn
-  ON fb.feedBinSwitch_l_hk = mn.feedBinSwitch_l_hk AND fb.startDate_dts <= mn.endDate_dts AND fb.endDate_dts >= mn.startDate_dts
-LEFT JOIN feedBinSwitch_l_active fbsa
-  ON fb.feedBin_h_hk_active = fbsa.feedBin_h_hk_active AND fb.endDate_dts = fbsa.endDate_dts
-LEFT JOIN feedBinSwitch_l_inactive fbsi
-  ON fb.feedBin_h_hk_inactive = fbsi.feedBin_h_hk_inactive AND fb.startDate_dts = fbsi.startDate_dts
-WHERE (fb.feedBin_h_hk_active IS NOT NULL OR fb.feedBin_h_hk_inactive IS NOT NULL)
+calculate per sow 
+
+Task specification 
+
+Connect the movement and value data of the group with the last sow connection. Stage will be calculated here. 
+
+Input processing 
+
+For the first iteration connect the first movement related to the preday groups of a sow incoming and outgoing from ðanimalGroup_movements_day and the group value info from ðanimalGroup_values by  
+
+ðsow_animalGroup_e2e_bb_last_day.animalGroup_h_hk =  
+
+ðanimalGroup_movements_day.animalGroup_h_hk_source or ðanimalGroup_movements_day.animalGroup_h_hk_target  
+
+and ðanimalGroup_values.animalGroup_h_hk  
+
+and ðanimalGroup_values.movement_id = ðanimalGroup_movements_day.movement_id 
+
+and for the weaning event ðweaning_l.weaningId = ðanimalGroup_movements_day.movement_id 
+
+and the latest info from ðweaning_l_all_ln_bs by ðweaning_l.weaning_l_hk = ðweaning_l_all_ln_bs.weaning_l_hk and ðweaning_l_all_ln_bs.currec = 1 
+
+Output processing 
+
+Each iteration will increment the values so after the last iteration the result value is written out -> one row per sow and group. 
+
+ïsow_animalGroup_e2e_bb_last_day.sow_h_hk := ðsow_animalGroup_e2e_bb_last_day.sow_h_hk 
+
+ïsow_animalGroup_e2e_bb_last_day.animalGroup_h_hk := ðanimalGroup_values.animalGroup_h_hk 
+
+|Transform|  
+
+ïsow_animalGroup_e2e_bb_last_day.stage =  
+
+if there is a weaning event ðweaning_l.weanDate = DATE( ðanimalGroup_values.timestamp_dts) for the groupDATE 
+
+then 'weaning' 
+
+else previous ðsow_animalGroup_e2e_bb_last_day.stage  (if this is 'farrowing', then 'piglets', if 'weaning' then fattening, else take as it is ) 
+
+|End| 
+
+ïsow_animalGroup_e2e_bb_last_day.date := ðe2e_dates.date of the overall iteration 
+
+|Transform|  
+
+ïsow_animalGroup_e2e_bb_last_day.factor =  
+
+if added and the source group is from the same sow then 
+
+(ïsow_animalGroup_e2e_bb_last_day.factor from the source group * ðanimalGroup_movements_day.animalsMoved  
+
++ ðanimalGroup_values.source_nr_animals * ðsow_animalGroup_e2e_bb_last_day.factor) (new nr of animal for the sow in the group) 
+
+/ ðanimalGroup_values.target_nr_animals  
+
+ 
+
+if removed 
+
+(ðanimalGroup_values.source_nr_animals * ðsow_animalGroup_e2e_bb_last_day.factor 
+
+- ðsow_animalGroup_e2e_bb_last_day.factor  * ðanimalGroup_movements_day.animalsMoved  
+
+) (new nr of animal for the sow in the group) 
+
+/ ðanimalGroup_values.target_nr_animals  
+
+ 
+
+if added and source group is not from the sow 
+
+ðanimalGroup_values.source_nr_animals * ðsow_animalGroup_e2e_bb_last_day.factor 
+
+/ ðanimalGroup_values.target_nr_animals  
+
+|End| 
+
+|Transform| 
+
+ ïsow_animalGroup_e2e_bb_last_day.avg_actual_weight_estimated = ðanimalGroup_values.target_weight / ðanimalGroup_values.target_nr_animals  
+
+* new factor from above| 
+
+|End| 
+
+Transform|  
+
+ïsow_animalGroup_e2e_bb_last_day.actual_number_of_pigs =  
+
+ðanimalGroup_values.target_nr_animals * new factor from above 
+
+|End|     
+
+Description 
+
+Process to calculate the end to end lifecycle process connected to the sow where the pigs came from. It will respect as far as possible all movements, placements, sales and deaths. 
+
+The bridge have to be filled in a delta load. Currently changes in the past will not be handled, but can be implemented later. So it will just handle new reporting dates (all  days between today and the max date in the bridge + 1 day and just the as is view from the sources (currec = 1). So the bridge will just contain the business history and a daily snapshot of the technical history on the batch run timestamp. 
