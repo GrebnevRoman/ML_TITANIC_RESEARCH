@@ -1,3 +1,89 @@
+get all movements on that day 
+
+Task specification 
+
+Attention perhaps placements are also needed if we have the source group info in the data. 
+
+Complex iterative process to get all movements from the source groups from ðsow_animalGroup_e2e_bb_last_day transitive to all target groups for that day and all movements into that group during the day. 
+
+Input processing 
+
+Each iteration will use the result of the last iteration as base. First iteration takes the ðsow_animalGroup_e2e_bb_last_day as starting point joining all movements from there with ðsow_animalGroup_e2e_bb_last_day.animalGroup_h_hk = ðanimalMovement_l.animalGroup_h_hk_source  for movements away (original group amount decrease) or ðsow_animalGroup_e2e_bb_last_day.animalGroup_h_hk = ðanimalMovement_l.animalGroup_h_hk_target (original group amount increase). 
+
+and in the case of move away 
+
+DATE(ðanimalMovement_l.startTime ) = ðsow_animalGroup_e2e_bb_last_day.date 
+
+and in the case of move in 
+
+DATE(ðanimalMovement_l_all_mn_bs.endTime ) = ðsow_animalGroup_e2e_bb_last_day.date 
+
+Animal Foster is threated the same way as these are just special movements where start end end are equal. 
+
+Output processing 
+
+|Transform|  
+
+ïanimalGroup_movements_day.movement_id = ðanimalMovement_l.animalMovementId OR ðanimalFoster_l.animalFosterId 
+
+|End| 
+
+|Transform|  
+
+ïanimalGroup_movements_day.animalGroup_h_hk_source =  
+
+ðsow_animalGroup_e2e_bb_last_day.animalGroup_h_hk  
+
+if there are movements away from the last day group 
+
+OR  
+
+ðanimalMovement_l.animalGroup_h_hk_source /ðanimalFoster_l.animalGroup_h_hk_source 
+
+if there are movements into the last day group 
+
+|End| 
+
+|Transform|  
+
+ïanimalGroup_movements_day.animalGroup_h_hk_target =  
+
+ðanimalMovement_l.animalGroup_h_hk_target / ðanimalFoster_l.animalGroup_h_hk_target 
+
+if there are movements away from the last day group 
+
+OR 
+
+ðsow_animalGroup_e2e_bb_last_day.animalGroup_h_hk  
+
+if there are movements into the last day group 
+
+|End| 
+
+|Transform|  
+
+ïanimalGroup_movements_day.animalsMoved := ðanimalMovement_l_all_mn_bs.numberOfAnimalsMoved / ðanimalFoster_l_all_mn_bs.numberOfAnimalsMoved 
+
+|Transform|  
+
+ïanimalGroup_movements_day.start_dts := ðanimalMovement_l.startTime /ðanimalFoster_l.animalFosterDate 
+
+|End| 
+
+|Transform|  
+
+ïanimalGroup_movements_day.totalWeightMoved := ðanimalMovement_l_all_mn_bs.totalWeight / ðanimalFoster_l_all_mn_bs.totalWeight 
+
+|End| 
+
+|Transform|  
+
+ïanimalGroup_movements_day.end_dts = ðanimalMovement_l_all_mn_bs.endTime / ðanimalFoster_l.animalFosterDate  
+
+
+
+
+
 calculate per sow 
 
 Task specification 
